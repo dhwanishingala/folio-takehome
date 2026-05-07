@@ -9,18 +9,33 @@ $error = null;
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $title = trim($_POST['title'] ?? '');
     $body = trim($_POST['body'] ?? '');
+    $publish_at_raw = trim($_POST['publish_at'] ?? '');
+    $publish_at = null;
 
     if ($title === '' || $body === '') {
         $error = 'Title and body are required.';
-    } else {
+    } elseif ($publish_at_raw !== '') {
+        $dt = DateTimeImmutable::createFromFormat('Y-m-d\TH:i', $publish_at_raw);
+        if ($dt === false) {
+            $error = 'Invalid publish date.';
+        } else {
+            $publish_at = $dt->format('Y-m-d H:i:s');
+        }
+    }
+
+    if (!$error) {
         $stmt = db()->prepare('
-            INSERT INTO documents (title, body, created_by)
-            VALUES (?, ?, ?)
+            INSERT INTO documents (title, body, created_by, publish_at)
+            VALUES (?, ?, ?, ?)
         ');
-        $stmt->execute([$title, $body, $staff['id']]);
+        $stmt->execute([$title, $body, $staff['id'], $publish_at]);
         $docId = (int) db()->lastInsertId();
 
-        audit_log('create', 'document', $docId, ['title' => $title]);
+        $details = ['title' => $title];
+        if ($publish_at) {
+            $details['publish_at'] = $publish_at;
+        }
+        audit_log('create_document', 'document', $docId, $details);
 
         header('Location: /admin.php?created=' . $docId);
         exit;
@@ -59,6 +74,10 @@ render_header('Admin', $staff);
             <label for="body">Body</label>
             <textarea id="body" name="body" required></textarea>
         </div>
+        <div class="form-field">
+            <label for="publish_at">Publish at <span class="optional">(leave blank to publish immediately)</span></label>
+            <input type="datetime-local" id="publish_at" name="publish_at">
+        </div>
         <button type="submit" class="btn">Create document</button>
     </form>
 </section>
@@ -75,6 +94,7 @@ render_header('Admin', $staff);
                     <th>Title</th>
                     <th>Creator</th>
                     <th>Created</th>
+                    <th>Publish At</th>
                     <th></th>
                 </tr>
             </thead>
@@ -85,6 +105,7 @@ render_header('Admin', $staff);
                         <td><?= h($d['title']) ?></td>
                         <td><?= h($d['creator_name']) ?></td>
                         <td><?= h($d['created_at']) ?></td>
+                        <td><?= $d['publish_at'] ? h($d['publish_at']) : '<em>immediate</em>' ?></td>
                         <td><a href="/share.php?doc=<?= (int) $d['id'] ?>" class="btn-link">Create share →</a></td>
                     </tr>
                 <?php endforeach ?>

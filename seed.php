@@ -7,8 +7,15 @@ if (file_exists($dbPath)) {
     unlink($dbPath);
 }
 
+// Apply the base schema with a raw connection so that db() (which also runs
+// migrations) sees the tables already in place when it initializes.
+$tmp = new PDO('sqlite:' . $dbPath);
+$tmp->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+$tmp->exec(file_get_contents(__DIR__ . '/schema.sql'));
+unset($tmp);
+
+// Initialize the app singleton — this applies any pending migrations.
 $pdo = db();
-$pdo->exec(file_get_contents(__DIR__ . '/schema.sql'));
 
 $pdo->exec("
     INSERT INTO staff (email, name) VALUES

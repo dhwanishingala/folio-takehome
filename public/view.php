@@ -27,6 +27,19 @@ if (!$doc) {
     exit;
 }
 
+if (!empty($doc['publish_at']) && strtotime($doc['publish_at']) > time()) {
+    http_response_code(403);
+    render_header('Not yet available');
+    ?>
+    <div class="centered-message">
+        <h1>Not yet available</h1>
+        <p>This document will be available on <?= h(date('F j, Y \a\t g:i A T', strtotime($doc['publish_at']))) ?>.</p>
+    </div>
+    <?php
+    render_footer();
+    exit;
+}
+
 render_header($doc['title']);
 ?>
 
