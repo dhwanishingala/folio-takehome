@@ -77,26 +77,42 @@ test('scheduled document is blocked before its publish time', function () {
     );
 });
 
-test('search finds document by partial title match', function () {
+test('search finds document by substring (FTS5 trigram)', function () {
     db()->prepare('
         INSERT INTO documents (title, body, created_by)
         VALUES (?, ?, 1)
     ')->execute(['Quarterly Report 2026', 'Content here.']);
 
-    $stmt = db()->prepare("
-        SELECT title FROM documents
-        WHERE title LIKE ?
-        ORDER BY created_at DESC
-        LIMIT 1
-    ");
-    $stmt->execute(['%Quarterly%']);
-    $row = $stmt->fetch();
+    $results = search_documents('Quarterly');
+    $titles = array_column($results, 'title');
+    assert_true(in_array('Quarterly Report 2026', $titles), 'FTS search should find "Quarterly Report 2026"');
+});
 
-    assert_true($row !== false, 'search should return at least one result');
-    assert_true(
-        stripos($row['title'], 'Quarterly') !== false,
-        'result title should contain the search term'
-    );
+test('search finds document by mid-word substring (FTS5 trigram)', function () {
+    db()->prepare('
+        INSERT INTO documents (title, body, created_by)
+        VALUES (?, ?, 1)
+    ')->execute(['Onboarding Handbook', 'Content.']);
+
+    $results = search_documents('board'); // mid-word substring of "Onboarding"
+    $titles = array_column($results, 'title');
+    assert_true(in_array('Onboarding Handbook', $titles), 'FTS trigram should match mid-word substring');
+});
+
+test('search finds document despite single-character typo (fuzzy fallback)', function () {
+    db()->prepare('
+        INSERT INTO documents (title, body, created_by)
+        VALUES (?, ?, 1)
+    ')->execute(['Benefits Guide', 'Content.']);
+
+    $results = search_documents('Benefts'); // missing 'i'
+    $titles = array_column($results, 'title');
+    assert_true(in_array('Benefits Guide', $titles), 'fuzzy fallback should find "Benefits Guide" despite typo');
+});
+
+test('search returns empty for completely unrelated query', function () {
+    $results = search_documents('xqznotexist');
+    assert_true(empty($results), 'search should return nothing for nonsense query');
 });
 
 test('created document gets a human-readable id in slug-year format', function () {
@@ -132,16 +148,6 @@ test('collision generates a suffixed readable id', function () {
         $next_id === $base_id . '-2',
         "expected {$base_id}-2, got: {$next_id}"
     );
-});
-
-test('search returns no results for unmatched query', function () {
-    $stmt = db()->prepare("
-        SELECT COUNT(*) as n FROM documents
-        WHERE title LIKE ?
-    ");
-    $stmt->execute(['%xqznotexist%']);
-    $row = $stmt->fetch();
-    assert_true((int) $row['n'] === 0, 'unmatched search should return zero results');
 });
 
 echo "\n{$pass} passed, {$fail} failed.\n";

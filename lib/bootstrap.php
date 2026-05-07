@@ -75,6 +75,60 @@ function audit_log(string $action, string $entity_type, int $entity_id, array $d
     ]);
 }
 
+function search_documents(string $q): array {
+    $q = trim($q);
+    if ($q === '') {
+        return db()->query('
+            SELECT d.*, s.name AS creator_name
+            FROM documents d
+            JOIN staff s ON s.id = d.created_by
+            ORDER BY d.created_at DESC
+        ')->fetchAll();
+    }
+
+    // FTS5 trigram: indexed, handles substrings at scale.
+    // Wrap in quotes so the query is treated as a literal phrase, not FTS5 operators.
+    try {
+        $fts_q = '"' . str_replace('"', '""', $q) . '"';
+        $stmt = db()->prepare('
+            SELECT d.*, s.name AS creator_name
+            FROM documents d
+            JOIN staff s ON s.id = d.created_by
+            WHERE d.id IN (SELECT rowid FROM documents_fts WHERE documents_fts MATCH ?)
+            ORDER BY d.created_at DESC
+        ');
+        $stmt->execute([$fts_q]);
+        $results = $stmt->fetchAll();
+        if (!empty($results)) {
+            return $results;
+        }
+    } catch (\PDOException $e) {
+        // FTS unavailable or bad query syntax — fall through to fuzzy
+    }
+
+    // Fuzzy fallback: word-level levenshtein for single-char typos.
+    // Only kicks in when FTS returns nothing.
+    $all = db()->query('
+        SELECT d.*, s.name AS creator_name
+        FROM documents d
+        JOIN staff s ON s.id = d.created_by
+        ORDER BY d.created_at DESC
+    ')->fetchAll();
+
+    $q_lower = strtolower($q);
+    // Allow more edits for longer queries; short queries must be exact
+    $threshold = strlen($q_lower) >= 8 ? 2 : (strlen($q_lower) >= 4 ? 1 : 0);
+
+    return array_values(array_filter($all, function ($doc) use ($q_lower, $threshold) {
+        foreach (preg_split('/\s+/', strtolower($doc['title'])) as $word) {
+            if (levenshtein($word, $q_lower) <= $threshold) {
+                return true;
+            }
+        }
+        return false;
+    }));
+}
+
 function generate_readable_id(string $title, int $year): string {
     $words = preg_split('/\s+/', trim($title));
     $slug_words = array_slice($words, 0, 2);
