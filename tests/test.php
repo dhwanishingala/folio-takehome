@@ -77,5 +77,72 @@ test('scheduled document is blocked before its publish time', function () {
     );
 });
 
+test('search finds document by partial title match', function () {
+    db()->prepare('
+        INSERT INTO documents (title, body, created_by)
+        VALUES (?, ?, 1)
+    ')->execute(['Quarterly Report 2026', 'Content here.']);
+
+    $stmt = db()->prepare("
+        SELECT title FROM documents
+        WHERE title LIKE ?
+        ORDER BY created_at DESC
+        LIMIT 1
+    ");
+    $stmt->execute(['%Quarterly%']);
+    $row = $stmt->fetch();
+
+    assert_true($row !== false, 'search should return at least one result');
+    assert_true(
+        stripos($row['title'], 'Quarterly') !== false,
+        'result title should contain the search term'
+    );
+});
+
+test('created document gets a human-readable id in slug-year format', function () {
+    $year = (int) date('Y');
+    $readable_id = generate_readable_id('Onboarding Guide', $year);
+    db()->prepare('
+        INSERT INTO documents (title, body, created_by, readable_id)
+        VALUES (?, ?, 1, ?)
+    ')->execute(['Onboarding Guide', 'Content.', $readable_id]);
+
+    $stmt = db()->prepare('SELECT readable_id FROM documents WHERE readable_id = ?');
+    $stmt->execute([$readable_id]);
+    $row = $stmt->fetch();
+
+    assert_true($row !== false, 'document should exist');
+    assert_true(
+        $row['readable_id'] === "onboarding-guide-{$year}",
+        "expected onboarding-guide-{$year}, got: " . var_export($row['readable_id'], true)
+    );
+});
+
+test('collision generates a suffixed readable id', function () {
+    $year = (int) date('Y');
+    $base_id = "collision-test-{$year}";
+
+    db()->prepare('
+        INSERT INTO documents (title, body, created_by, readable_id)
+        VALUES (?, ?, 1, ?)
+    ')->execute(['Collision Test', 'Body.', $base_id]);
+
+    $next_id = generate_readable_id('Collision Test', $year);
+    assert_true(
+        $next_id === $base_id . '-2',
+        "expected {$base_id}-2, got: {$next_id}"
+    );
+});
+
+test('search returns no results for unmatched query', function () {
+    $stmt = db()->prepare("
+        SELECT COUNT(*) as n FROM documents
+        WHERE title LIKE ?
+    ");
+    $stmt->execute(['%xqznotexist%']);
+    $row = $stmt->fetch();
+    assert_true((int) $row['n'] === 0, 'unmatched search should return zero results');
+});
+
 echo "\n{$pass} passed, {$fail} failed.\n";
 exit($fail > 0 ? 1 : 0);

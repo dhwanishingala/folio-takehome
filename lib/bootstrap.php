@@ -42,7 +42,10 @@ function run_migrations(): void {
             continue;
         }
 
-        $pdo->exec($migration['up']);
+        $stmts = is_array($migration['up']) ? $migration['up'] : [$migration['up']];
+        foreach ($stmts as $sql) {
+            $pdo->exec($sql);
+        }
         $pdo->prepare('INSERT INTO applied_migrations (version) VALUES (?)')->execute([$version]);
     }
 }
@@ -70,6 +73,28 @@ function audit_log(string $action, string $entity_type, int $entity_id, array $d
         $entity_id,
         json_encode($details),
     ]);
+}
+
+function generate_readable_id(string $title, int $year): string {
+    $words = preg_split('/\s+/', trim($title));
+    $slug_words = array_slice($words, 0, 2);
+    $slug_parts = array_map(fn($w) => preg_replace('/[^a-z0-9]+/', '', strtolower($w)), $slug_words);
+    $slug_parts = array_filter($slug_parts, fn($p) => $p !== '');
+    $slug = implode('-', $slug_parts) ?: 'doc';
+
+    $base = $slug . '-' . $year;
+    $candidate = $base;
+    $suffix = 2;
+    while (true) {
+        $stmt = db()->prepare('SELECT 1 FROM documents WHERE readable_id = ?');
+        $stmt->execute([$candidate]);
+        if (!$stmt->fetchColumn()) {
+            break;
+        }
+        $candidate = $base . '-' . $suffix;
+        $suffix++;
+    }
+    return $candidate;
 }
 
 function random_token(int $bytes = 16): string {
